@@ -1,366 +1,201 @@
+#include <Arduino.h>
+
+// MotorController.h
 class Encoder {
   public:
-    Encoder(uint8_t port1_temp, uint8_t port2_temp) {
-      pinMode(port1_temp, INPUT);
-      pinMode(port2_temp, INPUT);
-      current_port1 = digitalRead(port1_temp);
-      current_port2 = digitalRead(port2_temp);
-      last_port1 = digitalRead(port1_temp);
-      last_port2 = digitalRead(port2_temp);
-      port1 = port1_temp;
-      port2 = port2_temp;
-    }
-    long read() {
-      this->current_port1 = digitalRead(this->port1);
-      this->current_port2 = digitalRead(this->port2);
-      if (this->current_port1 != this->last_port1) {
-        this->change_port1 = true;
-        if (this->current_port2) {
-          if (this->current_port1) {
-            this->position += 1;
-          } else {
-            this->position -= 1;
-          }
+    Encoder(uint8_t port1, uint8_t port2) : port1_(port1), port2_(port2), last_port1_(digitalRead(port1)), last_port2_(digitalRead(port2)) {}
+    int8_t read() {
+      int8_t current_port1 = digitalRead(port1_);
+      int8_t current_port2 = digitalRead(port2_);
+      if (current_port1 != last_port1_) {
+        if (current_port2 == last_port2_) {
+          position_ += current_port1 == HIGH ? 1 : -1;
         } else {
-        if (this->current_port1) {
-            this->position -= 1;
-          } else {
-            this->position += 1;
-          }
-        }
-      } 
-      if (this->current_port2 != this->last_port2) {
-        this->change_port2 = true;
-        if (this->current_port1) {
-          if (this->current_port2) {
-            this->position -= 1;
-          } else {
-            this->position += 1;
-          }
-        } else {
-        if (this->current_port2) {
-            this->position += 1;
-          } else {
-            this->position -= 1;
-          }
+          position_ += current_port1 == HIGH ? -1 : 1;
         }
       }
-//      if (this->change_port1 && this->change_port2) {
-//        while(true) {
-//          Serial.println("ERROR: Encoders didn't update in time (both states changed)");
-//          // turn_off_all_motors(); // TODO
-//          delay(500);
-//        }
-//      }
-      this->last_port1 = this->current_port1;
-      this->last_port2 = this->current_port2;
-      this->change_port1 = false;
-      this->change_port2 = false;
-      return this->position;
+      if (current_port2 != last_port2_) {
+        if (current_port1 == last_port1_) {
+          position_ += current_port2 == HIGH ? -1 : 1;
+        } else {
+          position_ += current_port2 == HIGH ? 1 : -1;
+        }
+      }
+      last_port1_ = current_port1;
+      last_port2_ = current_port2;
+      return position_;
     }
-    void zero() {
-      this-> position = 0;
-    }
+    void zero() { position_ = 0; }
+
   private:
-    uint8_t port1;
-    uint8_t port2;
-    bool current_port1;
-    bool current_port2;
-    bool last_port1;
-    bool last_port2;
-    bool change_port1;
-    bool change_port2;
-    long position = 0;
+    uint8_t port1_;
+    uint8_t port2_;
+    int8_t last_port1_;
+    int8_t last_port2_;
+    int8_t position_ = 0;
 };
 
 class PID {
   public:
-    PID(float kP_temp, float kI_temp, float kD_temp) {
-      kP = kP_temp;
-      kI = kI_temp;
-      kD = kD_temp;
+    PID(float kP, float kI, float kD) : kP_(kP), kI_(kI), kD_(kD), integral_(0), last_error_(0) {}
+    float output(float error) {
+      float proportional = error * kP_;
+      integral_ += error * kI_;
+      float derivative = (error - last_error_) * kD_;
+      last_error_ = error;
+      return proportional + integral_ + derivative;
     }
-    float output(float input) {
-      float proportional = input * this-> kP;
-      float integral = 0; //TODO
-      float derivative = 0; //TODO
-      float velocity = proportional + integral + derivative;
-      return velocity;
-    }
+
   private:
-    float kP;
-    float kI;
-    float kD;
+    float kP_;
+    float kI_;
+    float kD_;
+    float integral_;
+    float last_error_ = 0;
 };
 
 class Motor {
   public:
-    Motor(uint8_t port_EN_temp, uint8_t port_PH_temp, uint8_t port_SLP_temp, uint8_t port_encoder1, uint8_t port_encoder2, float kP, float kI, float kD) : encoder(port_encoder1, port_encoder2), pid(kP, kI, kD) {
-      pinMode(port_EN_temp,  OUTPUT);
-      pinMode(port_PH_temp,  OUTPUT);
-      pinMode(port_SLP_temp, OUTPUT);
-      port_EN  = port_EN_temp;
-      port_PH  = port_PH_temp;
-      port_SLP = port_SLP_temp;
+    Motor(uint8_t port_EN, uint8_t port_PH, uint8_t port_SLP, uint8_t port_encoder1, uint8_t port_encoder2, float kP, float kI, float kD)
+        : encoder_(port_encoder1, port_encoder2), pid_(kP, kI, kD) {
+      pinMode(port_EN, OUTPUT);
+      pinMode(port_PH, OUTPUT);
+      pinMode(port_SLP, OUTPUT);
+      pinMode(port_encoder1, INPUT);
+      pinMode(port_encoder2, INPUT);
+      set_target(0);
+      off();
     }
-    void set_target(long target) {
-      this->target = target;
-    }
-    void update_position() {
-      this->position = this->encoder.read();
-    }
+    void set_target(int8_t target) { target_ = target; }
+    void update_position() { position_ = encoder_.read(); }
     void drive() {
       digitalWrite(port_SLP, HIGH);
-      long speed = this->pid.output((float)(this->target-this->position));
-      if (speed > 0) {
-        digitalWrite(port_PH, LOW);
-      }
-      else if (speed < 0) {
-        digitalWrite(port_PH, HIGH);
-      }
-      analogWrite(port_EN, -speed);
+      int8_t speed = pid_.output(target_ - position_);
+      digitalWrite(port_PH, speed > 0);
+      analogWrite(port_EN, abs(speed));
     }
-    void off() {
-      analogWrite(port_EN, 0);
-    }
-    long get_position() {
-      return this->position;
-    }
-    long get_target() {
-      return this->target;
-    }
-    bool stopped() {
-      this->last_position = this->position;
-      if (last_position != position) {
-        last_moving_time = millis();
-      } else if (millis() - last_moving_time >= 1000 && this->position == this->target) {
-        return true;
-      }
-      return false;
-    }
-    void zero() {
-      this->encoder.zero();
-    }
+    void off() { analogWrite(port_EN, 0); }
+    int8_t get_position() const { return position_; }
+    int8_t get_target() const { return target_; }
+
   private:
+    Encoder encoder_;
+    PID pid_;
     uint8_t port_EN;
     uint8_t port_PH;
     uint8_t port_SLP;
-    Encoder encoder;
-    long target;
-    long position;
-    PID pid;
-    long last_position;
-    long last_moving_time;
+    int8_t position_ = 0;
+    int8_t target_ = 0;
 };
 
-struct motor_targets {
-  uint8_t center = 0;
-  uint8_t left = 0;
-  uint8_t right = 0;
-};
-
-Motor center(5,4,12,A2,A3,10.0,0.0,0.0);
-Motor left  (6,7,13,A4,A5,10.0,0.0,0.0);
-Motor right (3,2, 8,A0,A1,10.0,0.0,0.0);
-
-unsigned long update_start = 0;
-//unsigned long update_finish = 0;
-unsigned long max_time = 400; // any longer and it can misread position-
-unsigned long time_taken = 0;
-// Has to be run 2480 times a second to make sure no encoders are missed
-// returns true if error
-bool update_all_positions() {
-  time_taken = micros() - update_start /*+ update_finish - update_start*/;
-  // check it hasn't been too long since encoders were read
-  if (time_taken > max_time) {
-    return true;
-  }
-  update_start = micros();
-  center.update_position();
-  left  .update_position();
-  right .update_position();
-  //update_finish = micros();
-  return false;
-}
-
-void turn_off_all_motors() {
-  center.off();
-  left  .off();
-  right .off();
-}
-
-uint8_t motor_scalar = 12; //23945.84/8/255 45 degrees
-void set_motor_targets(struct motor_targets *targets) {
-  center.set_target(int(targets->center * motor_scalar));
-  left  .set_target(int(targets->left * motor_scalar));
-  right .set_target(int(targets->right * motor_scalar));
-}
-
-void check_encoder_time() {
-  if (update_all_positions()) {
-    while(true) {
-      turn_off_all_motors();
-      Serial.println("");
-      Serial.print("ERROR: Too long to read encoders, time: ");
-      Serial.println(time_taken);
-      Serial.print("Positions: ");
-      Serial.print(center.get_position());
-      Serial.print(" ");
-      Serial.print(left.get_position());
-      Serial.print(" ");
-      Serial.println(right.get_position());
-      delay(500);
-    }
-  }
-}
-
-class SerialCustom {
+class MotorController {
   public:
-    void setup() {
-      Serial.begin(9600);
+    MotorController(Motor& center, Motor& left, Motor& right) : center_(center), left_(left), right_(right) {}
+    void update_positions() {
+      center_.update_position();
+      left_.update_position();
+      right_.update_position();
     }
-    void read(struct motor_targets *targets) {
-      if (Serial.availableForWrite() == 63 && Serial.available() == 1) {
-        int serial = Serial.read();
-        // TODO: Check if read returns -1
-        Serial.write(serial);
-        switch(serial_count) {
-          case 0:
-            targets->center = (uint8_t)serial;
-            serial_count = 1;
-            break;
-          case 1:
-            targets->left = (uint8_t)serial;
-            serial_count = 2;
-            break;
-          case 2:
-            targets->right = (uint8_t)serial;
-            serial_count = 0;
-            break;
-          default:
-            while(true) {
-              Serial.println("ERROR: serial_count not in bounds");
-              turn_off_all_motors();
-              delay(500);
-            }
-            break;
-        }
-      }
-      if (Serial.available() > 1) {
-        while(true) {
-              Serial.println("ERROR: Too much serial data recieved");
-              turn_off_all_motors();
-              delay(500);
-            }
-      }
+    void set_targets(int8_t center, int8_t left, int8_t right) {
+      center_.set_target(center);
+      left_.set_target(left);
+      right_.set_target(right);
     }
+    void drive() {
+      center_.drive();
+      left_.drive();
+      right_.drive();
+    }
+    void off() {
+      center_.off();
+      left_.off();
+      right_.off();
+    }
+    bool stopped() const {
+      return center_.get_position() == center_.get_target() && left_.get_position() == left_.get_target() && right_.get_position() == right_.get_target();
+    }
+    void zero() {
+      center_.zero();
+      left_.zero();
+      right_.zero();
+    }
+
   private:
-    uint8_t serial_count;
+    Motor& center_;
+    Motor& left_;
+    Motor& right_;
 };
 
-SerialCustom serial;
+class SerialHandler {
+  public:
+    SerialHandler(MotorController& motor_controller) : motor_controller_(motor_controller) {}
+    void update_targets() {
+      if (Serial.available() >= 3) {
+        int8_t center = Serial.read();
+        int8_t left = Serial.read();
+        int8_t right = Serial.read();
+        motor_controller_.set_targets(center, left, right);
+      }
+    }
 
-const long LONG_MAX = 2147483647;
+  private:
+    MotorController& motor_controller_;
+};
+
+// main.cpp
+#include "MotorController.h"
+
+Motor center(5, 4, 12, A2, A3, 10.0, 0.0, 0.0);
+Motor left(6, 7, 13, A4, A5, 10.0, 0.0, 0.0);
+Motor right(3, 2, 8, A0, A1, 10.0, 0.0, 0.0);
+
+MotorController motor_controller(center, left, right);
+SerialHandler serial_handler(motor_controller);
+
 void setup() {
-  serial.setup();
-  Serial.setTimeout(LONG_MAX);
-  //update_finish = micros();
-  Serial.println("STARTED");
-  delay(500);
-  update_start = micros();
+  Serial.begin(9600);
+  Serial.setTimeout(1000);
+  motor_controller.zero();
 }
 
-struct motor_targets targets;
-struct motor_targets* targets_pointer = &targets;
-//int ran = 0;
-bool calibrated = false;
-uint8_t calibration_serial_count = 0;
 void loop() {
-//  check_encoder_time();
-//  if (Serial.availableForWrite() == 63) {
-//    Serial.print("Positions: ");
-//    check_encoder_time();
-//    Serial.print(center.get_position());
-//    check_encoder_time();
-//    Serial.print(" ");
-//    check_encoder_time();
-//    Serial.print(left.get_position());
-//    check_encoder_time();
-//    Serial.print(" ");
-//    check_encoder_time();
-//    Serial.print(right.get_position());
-//    check_encoder_time();
-//    Serial.print(" Targets: ");
-//    check_encoder_time();
-//    Serial.print(center.get_target());
-//    check_encoder_time();
-//    Serial.print(" ");
-//    check_encoder_time();
-//    Serial.print(left.get_target());
-//    check_encoder_time();
-//    Serial.print(" ");
-//    check_encoder_time();
-//    Serial.println(right.get_target());
-//  }
-  check_encoder_time();
-  if (calibrated) {
-    serial.read(targets_pointer);
-    check_encoder_time();
-    set_motor_targets(targets_pointer);
-  } else if (center.stopped() && left.stopped() && right.stopped()) {
-      turn_off_all_motors();
-      String calibration_data;
-      switch(calibration_serial_count) {
-        case 0:
-          Serial.println("center motor position");
-          calibration_data = Serial.readStringUntil('|');
-          center.set_target(calibration_data.toInt());
-          Serial.println(String(center.get_target()));
-          calibration_serial_count = 1;
-          break;
-        case 1:
-          Serial.println("left motor position");
-          calibration_data = Serial.readStringUntil('|');
-          left.set_target(calibration_data.toInt());
-          Serial.println(String(left.get_target()));
-          calibration_serial_count = 2;
-          break;
-        case 2:
-          Serial.println("right motor position");
-          calibration_data = Serial.readStringUntil('|');
-          right.set_target(calibration_data.toInt());
-          Serial.println(String(right.get_target()));
-          calibration_serial_count = 3;
-          break;
-        case 3:
-          Serial.println("Finished calibration? (y/n)");
-          calibration_data = Serial.readStringUntil('|');
-          if (String(calibration_data) == "y") {
-            calibrated = true;
-            center.zero();
-            left.zero();
-            right.zero();
-            Serial.println("Calibration finished");
-          }
-          else {
-            calibration_serial_count = 0;
-            Serial.println("Calibration continued");
-          }
-          break;
-        default:
-          while(true) {
-            Serial.println("ERROR: calibration_serial_count not in bounds");
-            turn_off_all_motors();
-            delay(500);
-          }
-          break;
-      }
-      update_start = micros(); // Don't error cause it took too long
+  motor_controller.update_positions();
+  serial_handler.update_targets();
+  motor_controller.drive();
+  if (motor_controller.stopped()) {
+    motor_controller.off();
+    delay(1000);
+  }
+}
+
+// calibrate.cpp
+#include "MotorController.h"
+
+Motor center(5, 4, 12, A2, A3, 10.0, 0.0, 0.0);
+Motor left(6, 7, 13, A4, A5, 10.0, 0.0, 0.0);
+Motor right(3, 2, 8, A0, A1, 10.0, 0.0, 0.0);
+
+MotorController motor_controller(center, left, right);
+
+void setup() {
+  Serial.begin(9600);
+  Serial.setTimeout(1000);
+  motor_controller.zero();
+}
+
+void loop() {
+  if (Serial.available() >= 3) {
+    int8_t center = Serial.read();
+    int8_t left = Serial.read();
+    int8_t right = Serial.read();
+    motor_controller.set_targets(center, left, right);
+    motor_controller.drive();
+    while (!motor_controller.stopped()) {
+      motor_controller.update_positions();
+      motor_controller.drive();
     }
-  check_encoder_time();
-  center.drive();
-  check_encoder_time();
-  left.  drive();
-  check_encoder_time();
-  right. drive();
+    motor_controller.off();
+    Serial.println("Calibration complete");
+    delay(1000);
+  }
 }
