@@ -222,12 +222,14 @@ void setup() {
 }
 
 void loop() {
+    static bool calibrated = false;
+    static uint8_t calibration_serial_count = 0;
+
     check_encoder_time();
     struct motor_targets targets;
     serial.read(&targets);
     set_motor_targets(&targets);
 
-    static bool calibrated = false;
     if (!calibrated && center.stopped() && left.stopped() && right.stopped()) {
         turn_off_all_motors();
         String calibration_data;
@@ -276,7 +278,7 @@ void loop() {
                 break;
         }
     }
-
+    
     check_encoder_time();
     center.drive();
     left.drive();
