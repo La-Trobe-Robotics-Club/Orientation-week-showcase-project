@@ -87,8 +87,12 @@ public:
     void drive() {
         digitalWrite(port_SLP, HIGH);
         long speed = pid.output(target - position);
-        digitalWrite(port_PH, (speed < 0) ? HIGH : LOW);
-        analogWrite(port_EN, abs(speed));
+        if (speed > 0) {
+          digitalWrite(port_PH, LOW);
+        } else if (speed < 0) {
+          digitalWrite(port_PH, HIGH);
+        }
+        analogWrite(port_EN, -speed);
     }
 
     void off() {
@@ -104,14 +108,14 @@ public:
     }
 
     bool stopped() {
-        bool isStopped = (last_position == position);
-        if (!isStopped) {
+        last_position = position;
+        if (last_position != position) {
             last_moving_time = millis();
         } else if (millis() - last_moving_time >= 1000 && position == target) {
-            isStopped = true;
+            return true;
         }
         last_position = position;
-        return isStopped;
+        return false;
     }
 
     void zero() {
@@ -220,17 +224,16 @@ void setup() {
     Serial.println("STARTED");
     delay(500);
 }
-
 void loop() {
     static bool calibrated = false;
     static uint8_t calibration_serial_count = 0;
-
-    check_encoder_time();
-    struct motor_targets targets;
-    serial.read(&targets);
-    set_motor_targets(&targets);
-
-    if (!calibrated && center.stopped() && left.stopped() && right.stopped()) {
+    static struct motor_targets targets;
+    if (calibrated) {
+        check_encoder_time();
+        serial.read(&targets);
+        set_motor_targets(&targets);
+    }
+    else if (center.stopped() && left.stopped() && right.stopped()) {
         turn_off_all_motors();
         String calibration_data;
         switch (calibration_serial_count) {
