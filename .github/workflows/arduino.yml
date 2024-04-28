@@ -1,7 +1,6 @@
 on:
     push:
     pull_request:
-    workflow_dispatch:
 
 jobs:
   job:
@@ -12,5 +11,5 @@ jobs:
         with:
           fqbn: "arduino:avr:uno"
           sketch-paths:
-            "- /arduino"
+            "- arduino"
         
