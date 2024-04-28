@@ -3,11 +3,11 @@ on:
     pull_request:
 
 jobs:
-  job:
+  compile-sketches:
     runs-on: ubuntu-latest
     steps:
-      - name: Compile Arduino Sketches
-        uses: arduino/compile-sketches@v1.1.0
+      - uses: actions/checkout@v4.1.4
+      - uses: arduino/compile-sketches@v1.1.0
         with:
           fqbn: "arduino:avr:uno"
           sketch-paths:
