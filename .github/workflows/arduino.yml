@@ -11,3 +11,6 @@ jobs:
         uses: arduino/compile-sketches@v1.1.0
         with:
           fqbn: "arduino:avr:uno"
+          sketch-paths:
+            "- /arduino"
+        
