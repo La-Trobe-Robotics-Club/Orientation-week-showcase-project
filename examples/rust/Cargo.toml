@@ -1,0 +1,13 @@
+[package]
+name = "ball_detector"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "4.5.9", features = ["derive"] }
+env_logger = "0.11.3"
+log = "0.4.22"
+opencv = "0.92.0"
+serialport = "4.4.0"
